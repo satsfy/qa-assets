@@ -98,10 +98,15 @@ jobs:
             rust-bitcoin/target
           key: fuzz-${{ matrix.fuzz_target }}-${{ hashFiles('rust-bitcoin/**/Cargo.toml') }}
           restore-keys: fuzz-${{ matrix.fuzz_target }}-
+      # Build cargo-fuzz with stable. Its locked rustix dependency enables
+      # rustc-internal attributes when it detects a nightly compiler and no
+      # longer builds there.
       - name: Install cargo-fuzz
         run: |
-          cargo fuzz --version 2>/dev/null | grep -q '0\.12\.0' \
-            || cargo install --force --locked --version 0.12.0 cargo-fuzz
+          if ! cargo fuzz --version 2>/dev/null | grep -q '0\.12\.0'; then
+            rustup toolchain install stable --profile minimal --no-self-update
+            cargo +stable install --force --locked --version 0.12.0 cargo-fuzz
+          fi
       # Same weak-crypto flags rust-bitcoin CI uses for these targets. The
       # corpora must be generated and replayed under the same cfgs.
       - name: Set RUSTFLAGS

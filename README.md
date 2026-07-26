@@ -75,7 +75,11 @@ makes it usable on every PR. The rust-bitcoin CI job would look like
           repository: rust-bitcoin/qa-assets
           path: qa-assets
       - uses: dtolnay/rust-toolchain@nightly
-      - run: cargo install --locked --version 0.12.0 cargo-fuzz
+      # cargo-fuzz 0.12.0 must be built with stable, its locked rustix
+      # dependency does not build on current nightlies
+      - run: |
+          rustup toolchain install stable --profile minimal
+          cargo +stable install --locked --version 0.12.0 cargo-fuzz
       - name: Replay corpora
         run: |
           for target in $(cd fuzz && cargo fuzz list); do
