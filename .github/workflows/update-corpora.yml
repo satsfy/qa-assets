@@ -1,0 +1,196 @@
+# Fuzz every rust-bitcoin target seeded with the stored corpora, minimize,
+# and push the refreshed corpora back to this repository.
+#
+# Corpus files are written by libFuzzer and named by the SHA-1 of their
+# contents, so runs only ever add or remove whole files and diffs stay clean.
+name: Update fuzz corpora
+
+on:
+  schedule:
+    # 2am UTC daily, three hours before rust-bitcoin's own fuzz cron.
+    - cron: '00 02 * * *'
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: 'rust-bitcoin repository to fuzz (owner/repo)'
+        required: false
+        default: 'rust-bitcoin/rust-bitcoin'
+      source_ref:
+        description: 'Branch, tag or commit to fuzz'
+        required: false
+        default: 'master'
+      max_total_time:
+        description: 'Seconds of fuzzing per target'
+        required: false
+        default: '300'
+
+permissions: {}
+
+# Never let two runs race on the final push.
+concurrency:
+  group: update-corpora
+  cancel-in-progress: false
+
+env:
+  SOURCE_REPO: ${{ inputs.source_repo || 'rust-bitcoin/rust-bitcoin' }}
+  SOURCE_REF: ${{ inputs.source_ref || 'master' }}
+  MAX_TOTAL_TIME: ${{ inputs.max_total_time || '300' }}
+
+jobs:
+  # Resolve the source revision and enumerate fuzz targets so the matrix
+  # never goes stale when targets are added or removed upstream.
+  setup:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+      source_sha: ${{ steps.list.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ env.SOURCE_REF }}
+          persist-credentials: false
+      - name: List fuzz targets
+        id: list
+        run: |
+          export LC_ALL=C
+          cd fuzz
+          # Same transformation as fuzz/fuzz-util.sh targetFileToName. Sort
+          # after the rename so the order matches `cargo fuzz list`.
+          find fuzz_targets/ -type f -name '*.rs' \
+            | sed 's/^fuzz_targets\///; s/\.rs$//; s/\//_/g; s/^_//' \
+            | sort > "$RUNNER_TEMP/targets.txt"
+          echo "targets=$(jq -R . < "$RUNNER_TEMP/targets.txt" | jq -cs .)" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  fuzz:
+    needs: setup
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        fuzz_target: ${{ fromJSON(needs.setup.outputs.targets) }}
+    env:
+      TARGET: ${{ matrix.fuzz_target }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ env.SOURCE_REPO }}
+          ref: ${{ needs.setup.outputs.source_sha }}
+          path: rust-bitcoin
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5d458579430fc14a04a08a1e7d3694f545e91ce6
+        with:
+          toolchain: nightly
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/bin
+            rust-bitcoin/fuzz/target
+            rust-bitcoin/target
+          key: fuzz-${{ matrix.fuzz_target }}-${{ hashFiles('rust-bitcoin/**/Cargo.toml') }}
+          restore-keys: fuzz-${{ matrix.fuzz_target }}-
+      - name: Install cargo-fuzz
+        run: |
+          cargo fuzz --version 2>/dev/null | grep -q '0\.12\.0' \
+            || cargo install --force --locked --version 0.12.0 cargo-fuzz
+      # Same weak-crypto flags rust-bitcoin CI uses for these targets. The
+      # corpora must be generated and replayed under the same cfgs.
+      - name: Set RUSTFLAGS
+        if: startsWith(matrix.fuzz_target, 'bitcoin')
+        run: echo "RUSTFLAGS=--cfg=hashes_fuzz --cfg=secp256k1_fuzz" >> "$GITHUB_ENV"
+      - name: Seed corpus
+        run: |
+          mkdir -p "rust-bitcoin/fuzz/corpus/$TARGET"
+          if [ -d "fuzz_corpora/$TARGET" ]; then
+            find "fuzz_corpora/$TARGET" -maxdepth 1 -type f \
+              -exec cp -t "rust-bitcoin/fuzz/corpus/$TARGET/" {} +
+          fi
+      - name: Fuzz
+        working-directory: rust-bitcoin
+        run: cargo +nightly fuzz run "$TARGET" -- -max_total_time="$MAX_TOTAL_TIME"
+      - name: Minimize corpus
+        working-directory: rust-bitcoin
+        run: cargo +nightly fuzz cmin "$TARGET"
+      # Only reached when fuzzing found no crash, so crashing inputs never
+      # land in fuzz_corpora.
+      - name: Upload corpus
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: corpus-${{ matrix.fuzz_target }}
+          path: rust-bitcoin/fuzz/corpus/${{ matrix.fuzz_target }}
+          if-no-files-found: warn
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: crash-${{ matrix.fuzz_target }}
+          path: rust-bitcoin/fuzz/artifacts/${{ matrix.fuzz_target }}
+          if-no-files-found: ignore
+
+  # Merge the per-target corpora and push. Runs even when some fuzz jobs
+  # failed so that clean targets still get their update; failed targets keep
+  # their previous corpus.
+  merge:
+    needs: [setup, fuzz]
+    if: ${{ always() && needs.setup.result == 'success' && needs.fuzz.result != 'cancelled' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        continue-on-error: true
+        with:
+          pattern: corpus-*
+          path: incoming
+      - name: Refresh corpora
+        env:
+          TARGETS: ${{ needs.setup.outputs.targets }}
+        run: |
+          export LC_ALL=C
+          mkdir -p fuzz_corpora incoming
+          for dir in incoming/corpus-*/; do
+            [ -d "$dir" ] || continue
+            name=$(basename "$dir")
+            name=${name#corpus-}
+            rm -rf "fuzz_corpora/$name"
+            mkdir -p "fuzz_corpora/$name"
+            find "$dir" -maxdepth 1 -type f -exec cp -t "fuzz_corpora/$name/" {} +
+          done
+          # Drop corpora of targets that no longer exist upstream.
+          echo "$TARGETS" | jq -r '.[]' > "$RUNNER_TEMP/targets.txt"
+          for dir in fuzz_corpora/*/; do
+            [ -d "$dir" ] || continue
+            name=$(basename "$dir")
+            grep -qx "$name" "$RUNNER_TEMP/targets.txt" || rm -rf "$dir"
+          done
+      - name: Commit and push
+        env:
+          SOURCE_SHA: ${{ needs.setup.outputs.source_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          git add -A fuzz_corpora
+          if git diff --cached --quiet; then
+            echo "No corpus changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update fuzz corpora" \
+            -m "Source: $SOURCE_REPO@$SOURCE_SHA" \
+            -m "Run: $RUN_URL"
+          for _ in 1 2 3; do
+            git push origin "HEAD:$BRANCH" && exit 0
+            git pull --rebase origin "$BRANCH"
+          done
+          exit 1
