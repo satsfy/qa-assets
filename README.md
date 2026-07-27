@@ -12,6 +12,10 @@ already found once. Keeping minimized corpora here lets CI replay them on every
 PR as a cheap regression test and lets long fuzz runs resume where the last one
 stopped.
 
+[USAGE.md](USAGE.md) explains the update cycle in detail, what the runs so far
+actually did, and how to run the same loop locally with
+[contrib/local-fuzz.sh](contrib/local-fuzz.sh).
+
 ## Layout
 
     fuzz_corpora/<target>/    minimized libFuzzer corpus for one cargo-fuzz target
@@ -66,31 +70,31 @@ Replaying a corpus executes every stored input once and takes seconds, which
 makes it usable on every PR. The rust-bitcoin CI job would look like
 
 ```yaml
-  fuzz-regression:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/checkout@v6
-        with:
-          repository: rust-bitcoin/qa-assets
-          path: qa-assets
-      - uses: dtolnay/rust-toolchain@nightly
-      # cargo-fuzz 0.12.0 must be built with stable, its locked rustix
-      # dependency does not build on current nightlies
-      - run: |
-          rustup toolchain install stable --profile minimal
-          cargo +stable install --locked --version 0.12.0 cargo-fuzz
-      - name: Replay corpora
-        run: |
-          for target in $(cd fuzz && cargo fuzz list); do
-            if [[ "$target" =~ ^bitcoin ]]; then
-              export RUSTFLAGS='--cfg=hashes_fuzz --cfg=secp256k1_fuzz'
-            else
-              unset RUSTFLAGS
-            fi
-            mkdir -p "qa-assets/fuzz_corpora/$target"
-            cargo +nightly fuzz run "$target" "qa-assets/fuzz_corpora/$target" -- -runs=0
-          done
+fuzz-regression:
+  runs-on: ubuntu-24.04
+  steps:
+    - uses: actions/checkout@v6
+    - uses: actions/checkout@v6
+      with:
+        repository: rust-bitcoin/qa-assets
+        path: qa-assets
+    - uses: dtolnay/rust-toolchain@nightly
+    # cargo-fuzz 0.12.0 must be built with stable, its locked rustix
+    # dependency does not build on current nightlies
+    - run: |
+        rustup toolchain install stable --profile minimal
+        cargo +stable install --locked --version 0.12.0 cargo-fuzz
+    - name: Replay corpora
+      run: |
+        for target in $(cd fuzz && cargo fuzz list); do
+          if [[ "$target" =~ ^bitcoin ]]; then
+            export RUSTFLAGS='--cfg=hashes_fuzz --cfg=secp256k1_fuzz'
+          else
+            unset RUSTFLAGS
+          fi
+          mkdir -p "qa-assets/fuzz_corpora/$target"
+          cargo +nightly fuzz run "$target" "qa-assets/fuzz_corpora/$target" -- -runs=0
+        done
 ```
 
 `-runs=0` makes libFuzzer execute every corpus input during startup and exit
