@@ -84,34 +84,10 @@ The script runs the following phases:
 
 ## Replaying the corpora in CI
 
-Replaying a corpus mean we executes the saved memory. This is fast enough that it could be part of the CI of every rust-bitcoin PR.
+Replaying a corpus means executing the saved memory. This is fast enough that it can be part of the CI of every rust-bitcoin PR.
 
-```yaml
-fuzz-regression:
-  runs-on: ubuntu-24.04
-  steps:
-    - uses: actions/checkout@v6
-    - uses: actions/checkout@v6
-      with:
-        repository: rust-bitcoin/qa-assets
-        path: qa-assets
-    - uses: dtolnay/rust-toolchain@nightly
-    - run: |
-        rustup toolchain install stable --profile minimal
-        cargo +stable install --locked --version 0.12.0 cargo-fuzz
-    - name: Replay corpora
-      run: |
-        for target in $(cd fuzz && cargo fuzz list); do
-          if [[ "$target" =~ ^bitcoin ]]; then
-            export RUSTFLAGS='--cfg=hashes_fuzz --cfg=secp256k1_fuzz'
-          else
-            unset RUSTFLAGS
-          fi
-          mkdir -p "qa-assets/fuzz_corpora/$target"
-          cargo +nightly fuzz run "$target" "qa-assets/fuzz_corpora/$target" -- -runs=0
-        done
-```
+The rust-bitcoin side lives on the `corpora-fuzzing` branch. `fuzz/replay-corpora.sh` executes every stored input once per target (`-runs=0`, no fuzzing), and a `Fuzz-Regression` job in `rust.yml` checks out `<owner>/qa-assets` next to the source and calls it. Targets without a stored corpus are skipped, so new fuzz targets do not break CI before their first corpora land here.
 
 ## Fuzzing considerations
 
-Targets prefixed `bitcoin` are built with `RUSTFLAGS='--cfg=hashes_fuzz --cfg=secp256k1_fuzz'` (as in rust-bitcoin CI). Those cfgs swap real hashing and secp256k1 for cheap stand-ins so the fuzzer explores logic instead of crypto.
+All targets except those prefixed `hashes_` are built with `RUSTFLAGS='--cfg=hashes_fuzz --cfg=secp256k1_fuzz'`, matching rust-bitcoin's `fuzz.sh`. Those cfgs swap real hashing and secp256k1 for cheap stand-ins so the fuzzer explores logic instead of crypto. The hashes targets fuzz the real implementations and build without the stubs. Corpora are only meaningful under the cfgs they were generated with.

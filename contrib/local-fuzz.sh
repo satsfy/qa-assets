@@ -32,10 +32,11 @@ else
 fi
 
 for t in $targets; do
-  # Same weak-crypto cfgs rust-bitcoin CI uses for these targets.
+  # Same fuzz stub selection as rust-bitcoin's fuzz.sh, weak crypto for
+  # everything except the hashes targets which fuzz the real thing.
   case "$t" in
-    bitcoin*) export RUSTFLAGS='--cfg=hashes_fuzz --cfg=secp256k1_fuzz' ;;
-    *) unset RUSTFLAGS || true ;;
+    hashes_*) unset RUSTFLAGS || true ;;
+    *) export RUSTFLAGS='--cfg=hashes_fuzz --cfg=secp256k1_fuzz' ;;
   esac
 
   echo "=== $t: seed from $QA_DIR/fuzz_corpora/$t"
