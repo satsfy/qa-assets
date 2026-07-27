@@ -1,0 +1,3 @@
+# A rust-bitcoin checkout here mirrors the CI layout for local fuzzing
+# (see USAGE.md). Never commit it.
+/rust-bitcoin/
