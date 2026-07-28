@@ -7,8 +7,10 @@ name: Update fuzz corpora
 
 on:
   schedule:
-    # 2am UTC daily, three hours before rust-bitcoin's own fuzz cron.
-    - cron: '00 02 * * *'
+    # Hourly while the pipeline is being shaken out, a full run takes about
+    # 45 minutes. The concurrency group below keeps runs from overlapping.
+    # Drop back to daily once things settle.
+    - cron: '0 * * * *'
   workflow_dispatch:
     inputs:
       source_repo:
