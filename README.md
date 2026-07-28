@@ -1,13 +1,12 @@
 # qa-assets
 
-Fuzz corpora for the [rust-bitcoin](https://github.com/rust-bitcoin/rust-bitcoin)
-fuzz targets, in the style of Bitcoin Core's
-[qa-assets](https://github.com/bitcoin-core/qa-assets). Motivated by issue
-[#6511](https://github.com/rust-bitcoin/rust-bitcoin/issues/6511).
+Fuzz corpora for the [rust-bitcoin](https://github.com/rust-bitcoin/rust-bitcoin) fuzz targets, in the style of Bitcoin Core's [qa-assets](https://github.com/bitcoin-core/qa-assets). Motivated by issue [#6511](https://github.com/rust-bitcoin/rust-bitcoin/issues/6511).
 
-This repository is updated automatically and frequently from Forgejo Actions.
-Storing a fuzzing corpora lets CI replay them on every PR as a regression test and lets
-long fuzz runs resume where the last one stopped, preserving progress and edge cases.
+This repository is updated automatically and frequently. It has no CI jobs of its own, it stores fuzzing state from a corpora-based job in rust-bitcoin.
+
+The stored fuzzing corpora enables rust-bitcoin to:
+- Preserve and accumulate fuzzing progress and edge cases over time.
+- Replay interesting inputs previous found in fuzzing on every PR as a regression test.
 
 ## How the corpora are updated
 
