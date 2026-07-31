@@ -10,14 +10,15 @@ The stored fuzzing corpora enables rust-bitcoin to:
 
 ## How the corpora are updated
 
-The [update-corpora](.github/workflows/update-corpora.yml) workflow runs daily and on manual dispatch. For every target in rust-bitcoin master it seeds `fuzz/corpus/<target>` from `fuzz_corpora/<target>`, fuzzes for `max_total_time` seconds, minimizes the output with `cargo fuzz cmin`, and commits the result back. The target list is read from the checkout on every run, so new targets accumulate a corpus automatically and deleted ones are pruned.
+A workflow in rust-bitcoin runs daily and on manual dispatch. For every target in rust-bitcoin master it seeds `fuzz/corpus/<target>` from `fuzz_corpora/<target>`, fuzzes for `max_total_time` seconds, minimizes the output with `cargo fuzz cmin`, and pushes the result back here. The target list is read from the checkout on every run, so new targets accumulate a corpus automatically and deleted ones are pruned.
 
 A crash fails that target's job, uploads the input as a `crash-<target>` artifact, and leaves the stored corpus untouched. Crashing inputs are never committed.
+
+This repository holds no workflows of its own. Everything that writes to it is driven from rust-bitcoin.
 
 ## Layout
 
 - `fuzz_corpora/<target>/`: minimized libFuzzer corpus for one cargo-fuzz target
-- `.github/workflows/`: the update-corpora automation
 - `contrib/local-fuzz.sh`: (for local runs only) run one CI-style fuzz cycle
 - `rust-bitcoin/`: (for local runs only) ignored checkout used for fuzzing
 
